@@ -4,23 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 
 	"github.com/SAP/jenkins-library/pkg/config"
 	"github.com/SAP/jenkins-library/pkg/log"
 	"github.com/SAP/jenkins-library/pkg/piperutils"
-	"github.com/ghodss/yaml"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
 type defaultsCommandOptions struct {
-	output          string //output format of default configs, currently only YAML
-	outputFile      string //if set: path to file where the output should be written to
-	defaultsFiles   []string
-	stageConditions bool
-	openFile        func(s string, t map[string]string) (io.ReadCloser, error)
+	output        string //output format of default configs, currently only YAML
+	outputFile    string //if set: path to file where the output should be written to
+	defaultsFiles []string
+	useV1         bool
+	openFile      func(s string, t map[string]string) (io.ReadCloser, error)
 }
 
 var defaultsOptions defaultsCommandOptions
@@ -82,33 +80,26 @@ func getDefaults() ([]map[string]string, error) {
 		}
 		if err == nil {
 			var yamlContent string
-			if !defaultsOptions.stageConditions {
+
+			if !defaultsOptions.useV1 {
 				var c config.Config
 				c.ReadConfig(fc)
 
 				yamlContent, err = config.GetYAML(c)
-
 				if err != nil {
 					return yamlDefaults, errors.Wrapf(err, "defaults: could not marshal YAML default file: '%v", f)
 				}
-
 			} else {
-				var sc config.PipelineDefinitionV1
+				var rc config.RunConfigV1
+				rc.StageConfigFile = fc
+				rc.LoadConditionsV1()
 
-				defer fc.Close()
-				content, err := ioutil.ReadAll(fc)
+				yamlContent, err = config.GetYAML(rc.PipelineConfig)
 				if err != nil {
-					return yamlDefaults, errors.Wrapf(err, "error reading %v", fc)
+					return yamlDefaults, errors.Wrapf(err, "defaults: could not marshal YAML default file: '%v", f)
 				}
-
-				err = yaml.Unmarshal(content, &sc)
-				if err != nil {
-					return yamlDefaults, config.NewParseError(fmt.Sprintf("format of configuration is invalid %q: %v", content, err))
-				}
-
-				yamlContent, err = config.GetYAML(sc)
-
 			}
+
 			yamlDefaults = append(yamlDefaults, map[string]string{"content": yamlContent, "filepath": f})
 		}
 	}
@@ -152,6 +143,6 @@ func addDefaultsFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&defaultsOptions.output, "output", "yaml", "Defines the format of the configs embedded into a JSON object")
 	cmd.Flags().StringVar(&defaultsOptions.outputFile, "outputFile", "", "Defines the output filename")
 	cmd.Flags().StringArrayVar(&defaultsOptions.defaultsFiles, "defaultsFile", []string{}, "Defines the input defaults file(s)")
-	cmd.Flags().BoolVar(&defaultsOptions.stageConditions, "stageConditions", false, "If true, the defaultsFiles contain stage conditions")
+	cmd.Flags().BoolVar(&defaultsOptions.useV1, "useV1", false, "Input files are CRD-style stage configuration")
 	cmd.MarkFlagRequired("defaultsFile")
 }
